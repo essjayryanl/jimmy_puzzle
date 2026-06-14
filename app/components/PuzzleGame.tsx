@@ -34,6 +34,7 @@ function pieceStyle(pieceId: number, cols: number, size: number): React.CSSPrope
     backgroundRepeat: 'no-repeat',
     flexShrink: 0,
     touchAction: 'none',
+    cursor: 'grab',
   }
 }
 
@@ -70,12 +71,14 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
   const [tray, setTray] = useState<number[]>(() =>
     shuffle(Array.from({ length: total }, (_, i) => i))
   )
+  // drag is kept in BOTH a ref (for always-current reads in event handlers)
+  // and state (to trigger re-renders for the ghost piece visual)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [won, setWon] = useState(false)
   const [flash, setFlash] = useState<Set<number>>(new Set())
 
-  const containerRef = useRef<HTMLDivElement>(null)
   const boardRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<DragState | null>(null)
   const slotRef = useRef(slotMap)
   const trayRef = useRef(tray)
   const boardSizeRef = useRef(boardSize)
@@ -92,66 +95,81 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
     }
   }, [slotMap, total])
 
+  // Window-level pointer listeners — always attached so there's no timing gap
+  // between touchstart and the first touchmove on Android.
+  // { passive: false } lets preventDefault() actually stop scroll on Android.
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!dragRef.current) return
+      e.preventDefault()
+      const updated = { ...dragRef.current, mouseX: e.clientX, mouseY: e.clientY }
+      dragRef.current = updated
+      setDrag({ ...updated })
+    }
+
+    const onUp = (e: PointerEvent) => {
+      const d = dragRef.current
+      if (!d) return
+
+      if (boardRef.current) {
+        const rect = boardRef.current.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+        const bs = boardSizeRef.current
+        const ps = pieceSizeRef.current
+        const sm = slotRef.current
+        const tr = trayRef.current
+
+        if (x >= 0 && x < bs && y >= 0 && y < bs) {
+          const targetSlot = Math.floor(y / ps) * cols + Math.floor(x / ps)
+          const displaced = sm[targetSlot]
+          const newSlotMap = { ...sm }
+          if (d.fromSlot !== null) delete newSlotMap[d.fromSlot]
+          newSlotMap[targetSlot] = d.pieceId
+          let newTray = tr.filter(id => id !== d.pieceId)
+          if (displaced !== undefined) newTray = [...newTray, displaced]
+          setSlotMap(newSlotMap)
+          setTray(newTray)
+          if (targetSlot === d.pieceId) {
+            setFlash(s => new Set([...s, targetSlot]))
+            setTimeout(() => setFlash(s => { const n = new Set(s); n.delete(targetSlot); return n }), 600)
+          }
+        } else if (d.fromSlot !== null) {
+          const newSlotMap = { ...sm }
+          delete newSlotMap[d.fromSlot]
+          setSlotMap(newSlotMap)
+          setTray([...trayRef.current, d.pieceId])
+        }
+      }
+
+      dragRef.current = null
+      setDrag(null)
+    }
+
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [cols])
+
   const startDrag = useCallback((e: React.PointerEvent, pieceId: number, fromSlot: number | null) => {
     e.preventDefault()
-    // Capture on the container so pointermove/up always fire here, even mid-scroll on Android
-    containerRef.current?.setPointerCapture(e.pointerId)
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setDrag({
+    const state: DragState = {
       pieceId, fromSlot,
       mouseX: e.clientX, mouseY: e.clientY,
       offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
-    })
-  }, [])
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!drag) return
-    e.preventDefault()
-    setDrag(d => d ? { ...d, mouseX: e.clientX, mouseY: e.clientY } : null)
-  }, [drag])
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (!drag || !boardRef.current) { setDrag(null); return }
-
-    const rect = boardRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    const sm = slotRef.current
-    const tr = trayRef.current
-    const bs = boardSizeRef.current
-    const ps = pieceSizeRef.current
-
-    if (x >= 0 && x < bs && y >= 0 && y < bs) {
-      const targetSlot = Math.floor(y / ps) * cols + Math.floor(x / ps)
-      const displaced = sm[targetSlot]
-
-      const newSlotMap = { ...sm }
-      if (drag.fromSlot !== null) delete newSlotMap[drag.fromSlot]
-      newSlotMap[targetSlot] = drag.pieceId
-
-      let newTray = tr.filter(id => id !== drag.pieceId)
-      if (displaced !== undefined) newTray = [...newTray, displaced]
-
-      setSlotMap(newSlotMap)
-      setTray(newTray)
-
-      if (targetSlot === drag.pieceId) {
-        setFlash(s => new Set([...s, targetSlot]))
-        setTimeout(() => setFlash(s => { const n = new Set(s); n.delete(targetSlot); return n }), 600)
-      }
-    } else if (drag.fromSlot !== null) {
-      const newSlotMap = { ...sm }
-      delete newSlotMap[drag.fromSlot]
-      setSlotMap(newSlotMap)
-      setTray([...tr, drag.pieceId])
     }
-
-    setDrag(null)
-  }, [drag, cols])
+    dragRef.current = state
+    setDrag(state)
+  }, [])
 
   const reset = () => {
     setSlotMap({})
     setTray(shuffle(Array.from({ length: total }, (_, i) => i)))
+    dragRef.current = null
     setDrag(null)
     setWon(false)
     setFlash(new Set())
@@ -159,11 +177,8 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
 
   return (
     <div
-      ref={containerRef}
       className="bone-bg min-h-screen flex flex-col items-center justify-center p-4"
       style={{ userSelect: 'none', touchAction: 'none' }}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
     >
       {won && <Fireworks />}
 
