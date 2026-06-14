@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PuzzleGame, { type Difficulty } from './components/PuzzleGame'
 
 const DIFFICULTIES: { key: Difficulty; label: string; grid: string; pieces: string }[] = [
@@ -9,12 +9,70 @@ const DIFFICULTIES: { key: Difficulty; label: string; grid: string; pieces: stri
   { key: 'hard', label: 'Hard', grid: '5×5', pieces: '25 pieces' },
 ]
 
+const DOG_EMOJIS = ['🐶','🐕','🦮','🐕‍🦺','🐩','🐾','🦴','🐾','🐶','🐕','🐩','🦮']
+
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+}
+
 export default function Home() {
   const [playing, setPlaying] = useState(false)
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
+  const [showSplash, setShowSplash] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('splash') === 'skip') return
+    if (isMobileDevice()) setShowSplash(true)
+  }, [])
 
   if (playing) {
     return <PuzzleGame difficulty={difficulty} onBack={() => setPlaying(false)} />
+  }
+
+  if (showSplash) {
+    return (
+      <div className="bone-bg min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center mx-4 text-zinc-900">
+
+          <div className="text-5xl mb-4">🐾</div>
+          <h1 className="text-2xl font-black mb-3">Fetch! You&apos;re a bit early.</h1>
+          <p className="text-zinc-500 text-sm leading-relaxed mb-8">
+            {"Jimmy's Puzzle is still learning new tricks on mobile. A touch-friendly version is on its way — sit tight!"}
+          </p>
+
+          {/* Dog emoji parade */}
+          <div className="flex flex-wrap justify-center gap-2 mb-8 p-4 bg-zinc-50 rounded-2xl">
+            {DOG_EMOJIS.map((emoji, i) => (
+              <span
+                key={i}
+                className="text-2xl"
+                style={{
+                  animation: `bounce 1.2s ease-in-out ${i * 0.1}s infinite alternate`,
+                  display: 'inline-block',
+                }}
+              >
+                {emoji}
+              </span>
+            ))}
+          </div>
+
+          <button
+            onClick={() => setShowSplash(false)}
+            className="w-full py-3 rounded-2xl font-bold text-sm border-2 border-zinc-200 text-zinc-500 hover:bg-zinc-50 transition-colors"
+          >
+            Try it anyway (it&apos;s a little wonky) 🤞
+          </button>
+        </div>
+
+        <style>{`
+          @keyframes bounce {
+            from { transform: translateY(0px); }
+            to { transform: translateY(-6px); }
+          }
+        `}</style>
+      </div>
+    )
   }
 
   return (
@@ -23,7 +81,6 @@ export default function Home() {
         <div className="text-5xl mb-2">🐶</div>
         <h1 className="text-3xl font-black mb-6">{"Jimmy's Puzzle"}</h1>
 
-        {/* Jimmy preview */}
         <div className="w-44 h-44 mx-auto mb-8 rounded-2xl overflow-hidden shadow-md border-4 border-zinc-100">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/jimmy.jpg" alt="Jimmy" className="w-full h-full object-cover" />
