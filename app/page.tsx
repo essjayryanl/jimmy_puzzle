@@ -12,7 +12,9 @@ const DIFFICULTIES: { key: Difficulty; label: string; grid: string; pieces: stri
 const DOG_EMOJIS = ['🐶','🐕','🦮','🐕‍🦺','🐩','🐾','🦴','🐾','🐶','🐕','🐩','🦮']
 
 function isMobileDevice() {
-  return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  const byUA = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  const byWidth = window.innerWidth < 768
+  return byUA || byWidth
 }
 
 export default function Home() {
