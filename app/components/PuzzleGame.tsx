@@ -5,7 +5,7 @@ import Fireworks from './Fireworks'
 
 export type Difficulty = 'easy' | 'medium' | 'hard'
 const GRID: Record<Difficulty, number> = { easy: 3, medium: 4, hard: 5 }
-const BOARD_SIZE = 420
+const MAX_BOARD = 420
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
@@ -33,6 +33,7 @@ function pieceStyle(pieceId: number, cols: number, size: number): React.CSSPrope
     backgroundPosition: `-${col * size}px -${row * size}px`,
     backgroundRepeat: 'no-repeat',
     flexShrink: 0,
+    touchAction: 'none',
   }
 }
 
@@ -50,8 +51,21 @@ interface Props {
 
 export default function PuzzleGame({ difficulty, onBack }: Props) {
   const cols = GRID[difficulty]
-  const pieceSize = BOARD_SIZE / cols
   const total = cols * cols
+
+  // Responsive: fills screen width on mobile, capped at MAX_BOARD on desktop
+  const [boardSize, setBoardSize] = useState(MAX_BOARD)
+  useEffect(() => {
+    const calc = () => {
+      const maxW = Math.min(window.innerWidth - 32, MAX_BOARD)
+      setBoardSize(Math.floor(maxW / cols) * cols)
+    }
+    calc()
+    window.addEventListener('resize', calc)
+    return () => window.removeEventListener('resize', calc)
+  }, [cols])
+
+  const pieceSize = boardSize / cols
 
   const [slotMap, setSlotMap] = useState<Record<number, number>>({})
   const [tray, setTray] = useState<number[]>(() =>
@@ -62,11 +76,15 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
   const [flash, setFlash] = useState<Set<number>>(new Set())
 
   const boardRef = useRef<HTMLDivElement>(null)
-  // Refs to avoid stale closures in window event handlers
+  // Refs so event handlers always read current values without stale closures
   const slotRef = useRef(slotMap)
   const trayRef = useRef(tray)
+  const boardSizeRef = useRef(boardSize)
+  const pieceSizeRef = useRef(pieceSize)
   slotRef.current = slotMap
   trayRef.current = tray
+  boardSizeRef.current = boardSize
+  pieceSizeRef.current = pieceSize
 
   // Win check
   useEffect(() => {
@@ -76,18 +94,23 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
     }
   }, [slotMap, total])
 
-  const startDrag = useCallback((e: React.MouseEvent, pieceId: number, fromSlot: number | null) => {
+  const startDrag = useCallback((e: React.PointerEvent, pieceId: number, fromSlot: number | null) => {
     e.preventDefault()
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setDrag({ pieceId, fromSlot, mouseX: e.clientX, mouseY: e.clientY, offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top })
+    setDrag({
+      pieceId, fromSlot,
+      mouseX: e.clientX, mouseY: e.clientY,
+      offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
+    })
   }, [])
 
   useEffect(() => {
     if (!drag) return
 
-    const onMove = (e: MouseEvent) => setDrag(d => d ? { ...d, mouseX: e.clientX, mouseY: e.clientY } : null)
+    const onMove = (e: PointerEvent) =>
+      setDrag(d => d ? { ...d, mouseX: e.clientX, mouseY: e.clientY } : null)
 
-    const onUp = (e: MouseEvent) => {
+    const onUp = (e: PointerEvent) => {
       if (!drag || !boardRef.current) { setDrag(null); return }
 
       const rect = boardRef.current.getBoundingClientRect()
@@ -95,9 +118,11 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
       const y = e.clientY - rect.top
       const sm = slotRef.current
       const tr = trayRef.current
+      const bs = boardSizeRef.current
+      const ps = pieceSizeRef.current
 
-      if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE) {
-        const targetSlot = Math.floor(y / pieceSize) * cols + Math.floor(x / pieceSize)
+      if (x >= 0 && x < bs && y >= 0 && y < bs) {
+        const targetSlot = Math.floor(y / ps) * cols + Math.floor(x / ps)
         const displaced = sm[targetSlot]
 
         const newSlotMap = { ...sm }
@@ -110,13 +135,11 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
         setSlotMap(newSlotMap)
         setTray(newTray)
 
-        // Flash green if piece landed in its correct slot
         if (targetSlot === drag.pieceId) {
           setFlash(s => new Set([...s, targetSlot]))
           setTimeout(() => setFlash(s => { const n = new Set(s); n.delete(targetSlot); return n }), 600)
         }
       } else if (drag.fromSlot !== null) {
-        // Dropped outside board — return piece to tray
         const newSlotMap = { ...sm }
         delete newSlotMap[drag.fromSlot]
         setSlotMap(newSlotMap)
@@ -126,10 +149,13 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
       setDrag(null)
     }
 
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
-  }, [drag, cols, pieceSize])
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [drag, cols])
 
   const reset = () => {
     setSlotMap({})
@@ -139,19 +165,14 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
     setFlash(new Set())
   }
 
-  const trayWidth = 2 * (pieceSize + 8) + 24
-
   return (
-    <div
-      className="bone-bg min-h-screen flex flex-col items-center justify-center p-6"
-      style={{ userSelect: 'none' }}
-    >
+    <div className="bone-bg min-h-screen flex flex-col items-center justify-center p-4" style={{ userSelect: 'none' }}>
       {won && <Fireworks />}
 
       {/* Win overlay */}
       {won && (
         <div className="fixed inset-0 flex items-center justify-center z-40" style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-3xl shadow-2xl p-12 text-center max-w-xs w-full">
+          <div className="bg-white rounded-3xl shadow-2xl p-10 text-center max-w-xs w-full mx-4">
             <div className="text-6xl mb-4">🎉</div>
             <h2 className="text-3xl font-black mb-2">You did it!</h2>
             <p className="text-zinc-500 mb-8 text-sm">Jimmy is back in one piece!</p>
@@ -168,7 +189,7 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-4 mb-4 w-full max-w-3xl">
+      <div className="flex items-center gap-4 mb-4 w-full" style={{ maxWidth: boardSize }}>
         <button onClick={onBack} className="text-sm text-zinc-500 hover:text-zinc-800 transition-colors px-3 py-1 rounded-full bg-white/70 shadow-sm">
           ← Back
         </button>
@@ -180,66 +201,62 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
         </button>
       </div>
 
-      <div className="text-sm text-zinc-500 mb-4">
+      <div className="text-sm text-zinc-500 mb-3">
         {Object.keys(slotMap).length} / {total} pieces placed
       </div>
 
-      {/* Game area */}
-      <div className="flex gap-6 items-start">
-        {/* Board */}
-        <div
-          ref={boardRef}
-          className="relative rounded-xl overflow-hidden shadow-lg border-2 border-white bg-white/80"
-          style={{ width: BOARD_SIZE, height: BOARD_SIZE }}
-        >
-          {Array.from({ length: total }, (_, i) => {
-            const row = Math.floor(i / cols)
-            const col = i % cols
-            const placed = slotMap[i]
-            const draggingThis = drag?.pieceId === placed && drag?.fromSlot === i
-            const isFlashing = flash.has(i)
+      {/* Board — stacked above tray on all screen sizes */}
+      <div
+        ref={boardRef}
+        className="relative rounded-xl overflow-hidden shadow-lg border-2 border-white bg-white/80 mb-4"
+        style={{ width: boardSize, height: boardSize }}
+      >
+        {Array.from({ length: total }, (_, i) => {
+          const row = Math.floor(i / cols)
+          const col = i % cols
+          const placed = slotMap[i]
+          const draggingThis = drag?.pieceId === placed && drag?.fromSlot === i
+          const isFlashing = flash.has(i)
 
-            return (
-              <div
-                key={i}
-                className={`absolute transition-all ${isFlashing ? 'ring-2 ring-inset ring-green-400' : ''}`}
-                style={{
-                  left: col * pieceSize, top: row * pieceSize,
-                  width: pieceSize, height: pieceSize,
-                  background: placed === undefined ? '#f1f5f9' : 'transparent',
-                  border: '1px solid rgba(0,0,0,0.08)',
-                }}
-              >
-                {placed !== undefined && !draggingThis && (
-                  <div
-                    className="cursor-grab active:cursor-grabbing"
-                    style={pieceStyle(placed, cols, pieceSize)}
-                    onMouseDown={(e) => startDrag(e, placed, i)}
-                  />
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Tray */}
-        <div
-          className="rounded-xl border-2 border-white bg-white/80 shadow-lg p-3 overflow-y-auto"
-          style={{ width: trayWidth, maxHeight: BOARD_SIZE + 20 }}
-        >
-          <p className="text-xs text-zinc-400 text-center mb-2 font-medium">Pieces</p>
-          <div className="flex flex-wrap gap-2">
-            {tray
-              .filter(id => drag?.pieceId !== id)
-              .map(id => (
+          return (
+            <div
+              key={i}
+              className={`absolute transition-all ${isFlashing ? 'ring-2 ring-inset ring-green-400' : ''}`}
+              style={{
+                left: col * pieceSize, top: row * pieceSize,
+                width: pieceSize, height: pieceSize,
+                background: placed === undefined ? '#f1f5f9' : 'transparent',
+                border: '1px solid rgba(0,0,0,0.08)',
+              }}
+            >
+              {placed !== undefined && !draggingThis && (
                 <div
-                  key={id}
-                  className="cursor-grab active:cursor-grabbing rounded-md shadow-sm hover:shadow-md transition-shadow border border-white/80"
-                  style={pieceStyle(id, cols, pieceSize)}
-                  onMouseDown={(e) => startDrag(e, id, null)}
+                  style={pieceStyle(placed, cols, pieceSize)}
+                  onPointerDown={(e) => startDrag(e, placed, i)}
                 />
-              ))}
-          </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Tray — wrapping grid below the board */}
+      <div
+        className="rounded-xl border-2 border-white bg-white/80 shadow-lg p-3"
+        style={{ width: boardSize }}
+      >
+        <p className="text-xs text-zinc-400 text-center mb-2 font-medium">Pieces</p>
+        <div className="flex flex-wrap gap-2">
+          {tray
+            .filter(id => drag?.pieceId !== id)
+            .map(id => (
+              <div
+                key={id}
+                className="rounded-md shadow-sm border border-white/80"
+                style={pieceStyle(id, cols, pieceSize)}
+                onPointerDown={(e) => startDrag(e, id, null)}
+              />
+            ))}
         </div>
       </div>
 
