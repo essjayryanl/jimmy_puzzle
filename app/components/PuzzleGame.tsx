@@ -53,7 +53,6 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
   const cols = GRID[difficulty]
   const total = cols * cols
 
-  // Responsive: fills screen width on mobile, capped at MAX_BOARD on desktop
   const [boardSize, setBoardSize] = useState(MAX_BOARD)
   useEffect(() => {
     const calc = () => {
@@ -75,8 +74,8 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
   const [won, setWon] = useState(false)
   const [flash, setFlash] = useState<Set<number>>(new Set())
 
+  const containerRef = useRef<HTMLDivElement>(null)
   const boardRef = useRef<HTMLDivElement>(null)
-  // Refs so event handlers always read current values without stale closures
   const slotRef = useRef(slotMap)
   const trayRef = useRef(tray)
   const boardSizeRef = useRef(boardSize)
@@ -86,7 +85,6 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
   boardSizeRef.current = boardSize
   pieceSizeRef.current = pieceSize
 
-  // Win check
   useEffect(() => {
     const entries = Object.entries(slotMap)
     if (entries.length === total && entries.every(([s, p]) => parseInt(s) === p)) {
@@ -96,6 +94,8 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
 
   const startDrag = useCallback((e: React.PointerEvent, pieceId: number, fromSlot: number | null) => {
     e.preventDefault()
+    // Capture on the container so pointermove/up always fire here, even mid-scroll on Android
+    containerRef.current?.setPointerCapture(e.pointerId)
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setDrag({
       pieceId, fromSlot,
@@ -104,57 +104,49 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
     })
   }, [])
 
-  useEffect(() => {
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!drag) return
+    e.preventDefault()
+    setDrag(d => d ? { ...d, mouseX: e.clientX, mouseY: e.clientY } : null)
+  }, [drag])
 
-    const onMove = (e: PointerEvent) =>
-      setDrag(d => d ? { ...d, mouseX: e.clientX, mouseY: e.clientY } : null)
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!drag || !boardRef.current) { setDrag(null); return }
 
-    const onUp = (e: PointerEvent) => {
-      if (!drag || !boardRef.current) { setDrag(null); return }
+    const rect = boardRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const sm = slotRef.current
+    const tr = trayRef.current
+    const bs = boardSizeRef.current
+    const ps = pieceSizeRef.current
 
-      const rect = boardRef.current.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      const sm = slotRef.current
-      const tr = trayRef.current
-      const bs = boardSizeRef.current
-      const ps = pieceSizeRef.current
+    if (x >= 0 && x < bs && y >= 0 && y < bs) {
+      const targetSlot = Math.floor(y / ps) * cols + Math.floor(x / ps)
+      const displaced = sm[targetSlot]
 
-      if (x >= 0 && x < bs && y >= 0 && y < bs) {
-        const targetSlot = Math.floor(y / ps) * cols + Math.floor(x / ps)
-        const displaced = sm[targetSlot]
+      const newSlotMap = { ...sm }
+      if (drag.fromSlot !== null) delete newSlotMap[drag.fromSlot]
+      newSlotMap[targetSlot] = drag.pieceId
 
-        const newSlotMap = { ...sm }
-        if (drag.fromSlot !== null) delete newSlotMap[drag.fromSlot]
-        newSlotMap[targetSlot] = drag.pieceId
+      let newTray = tr.filter(id => id !== drag.pieceId)
+      if (displaced !== undefined) newTray = [...newTray, displaced]
 
-        let newTray = tr.filter(id => id !== drag.pieceId)
-        if (displaced !== undefined) newTray = [...newTray, displaced]
+      setSlotMap(newSlotMap)
+      setTray(newTray)
 
-        setSlotMap(newSlotMap)
-        setTray(newTray)
-
-        if (targetSlot === drag.pieceId) {
-          setFlash(s => new Set([...s, targetSlot]))
-          setTimeout(() => setFlash(s => { const n = new Set(s); n.delete(targetSlot); return n }), 600)
-        }
-      } else if (drag.fromSlot !== null) {
-        const newSlotMap = { ...sm }
-        delete newSlotMap[drag.fromSlot]
-        setSlotMap(newSlotMap)
-        setTray([...tr, drag.pieceId])
+      if (targetSlot === drag.pieceId) {
+        setFlash(s => new Set([...s, targetSlot]))
+        setTimeout(() => setFlash(s => { const n = new Set(s); n.delete(targetSlot); return n }), 600)
       }
-
-      setDrag(null)
+    } else if (drag.fromSlot !== null) {
+      const newSlotMap = { ...sm }
+      delete newSlotMap[drag.fromSlot]
+      setSlotMap(newSlotMap)
+      setTray([...tr, drag.pieceId])
     }
 
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
+    setDrag(null)
   }, [drag, cols])
 
   const reset = () => {
@@ -166,13 +158,18 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
   }
 
   return (
-    <div className="bone-bg min-h-screen flex flex-col items-center justify-center p-4" style={{ userSelect: 'none' }}>
+    <div
+      ref={containerRef}
+      className="bone-bg min-h-screen flex flex-col items-center justify-center p-4"
+      style={{ userSelect: 'none', touchAction: 'none' }}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
       {won && <Fireworks />}
 
-      {/* Win overlay */}
       {won && (
         <div className="fixed inset-0 flex items-center justify-center z-40" style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-3xl shadow-2xl p-10 text-center max-w-xs w-full mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl p-10 text-center max-w-xs w-full mx-4 text-zinc-900">
             <div className="text-6xl mb-4">🎉</div>
             <h2 className="text-3xl font-black mb-2">You did it!</h2>
             <p className="text-zinc-500 mb-8 text-sm">Jimmy is back in one piece!</p>
@@ -180,7 +177,7 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
               <button onClick={reset} className="flex-1 py-3 rounded-2xl font-bold text-white transition-all hover:scale-105" style={{ background: '#171717' }}>
                 Play again
               </button>
-              <button onClick={onBack} className="flex-1 py-3 rounded-2xl font-bold border-2 border-zinc-200 hover:bg-zinc-50 transition-colors">
+              <button onClick={onBack} className="flex-1 py-3 rounded-2xl font-bold border-2 border-zinc-200 hover:bg-zinc-50 transition-colors text-zinc-900">
                 Menu
               </button>
             </div>
@@ -188,12 +185,11 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
         </div>
       )}
 
-      {/* Header */}
       <div className="flex items-center gap-4 mb-4 w-full" style={{ maxWidth: boardSize }}>
         <button onClick={onBack} className="text-sm text-zinc-500 hover:text-zinc-800 transition-colors px-3 py-1 rounded-full bg-white/70 shadow-sm">
           ← Back
         </button>
-        <span className="flex-1 text-center font-black text-lg capitalize">
+        <span className="flex-1 text-center font-black text-lg capitalize text-zinc-900">
           {difficulty} · {cols}×{cols}
         </span>
         <button onClick={reset} className="text-sm text-zinc-500 hover:text-zinc-800 transition-colors px-3 py-1 rounded-full bg-white/70 shadow-sm">
@@ -201,11 +197,10 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
         </button>
       </div>
 
-      <div className="text-sm text-zinc-500 mb-3">
+      <div className="text-sm text-zinc-600 mb-3 font-medium">
         {Object.keys(slotMap).length} / {total} pieces placed
       </div>
 
-      {/* Board — stacked above tray on all screen sizes */}
       <div
         ref={boardRef}
         className="relative rounded-xl overflow-hidden shadow-lg border-2 border-white bg-white/80 mb-4"
@@ -240,12 +235,11 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
         })}
       </div>
 
-      {/* Tray — wrapping grid below the board */}
       <div
         className="rounded-xl border-2 border-white bg-white/80 shadow-lg p-3"
         style={{ width: boardSize }}
       >
-        <p className="text-xs text-zinc-400 text-center mb-2 font-medium">Pieces</p>
+        <p className="text-xs text-zinc-500 text-center mb-2 font-medium">Pieces</p>
         <div className="flex flex-wrap gap-2">
           {tray
             .filter(id => drag?.pieceId !== id)
@@ -260,7 +254,6 @@ export default function PuzzleGame({ difficulty, onBack }: Props) {
         </div>
       </div>
 
-      {/* Floating drag ghost */}
       {drag && (
         <div
           className="fixed pointer-events-none z-50 rounded-md shadow-2xl"

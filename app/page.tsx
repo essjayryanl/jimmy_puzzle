@@ -19,7 +19,7 @@ export default function Home() {
 
   return (
     <div className="bone-bg min-h-screen flex items-center justify-center p-8">
-      <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center mx-4">
+      <div className="bg-white rounded-3xl shadow-xl p-8 max-w-sm w-full text-center mx-4 text-zinc-900">
         <div className="text-5xl mb-2">🐶</div>
         <h1 className="text-3xl font-black mb-6">{"Jimmy's Puzzle"}</h1>
 
