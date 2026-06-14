@@ -23,7 +23,7 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('splash') === 'skip') return
-    if (isMobileDevice()) setShowSplash(true)
+    if (params.get('splash') === 'force' || isMobileDevice()) setShowSplash(true)
   }, [])
 
   if (playing) {
