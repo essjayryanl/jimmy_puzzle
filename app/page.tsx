@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import PuzzleGame, { type Difficulty } from './components/PuzzleGame'
 
 const DIFFICULTIES: { key: Difficulty; label: string; grid: string; pieces: string }[] = [
@@ -20,13 +20,14 @@ function isMobileDevice() {
 export default function Home() {
   const [playing, setPlaying] = useState(false)
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
-  const [showSplash, setShowSplash] = useState(false)
-
-  useEffect(() => {
+  // Initialiser runs synchronously on the client (skipped during SSR via window guard)
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === 'undefined') return false
     const params = new URLSearchParams(window.location.search)
-    if (params.get('splash') === 'skip') return
-    if (params.get('splash') === 'force' || isMobileDevice()) setShowSplash(true)
-  }, [])
+    if (params.get('splash') === 'skip') return false
+    if (params.get('splash') === 'force') return true
+    return isMobileDevice()
+  })
 
   if (playing) {
     return <PuzzleGame difficulty={difficulty} onBack={() => setPlaying(false)} />
